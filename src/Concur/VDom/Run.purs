@@ -2,20 +2,27 @@ module Concur.VDom.Run where
 
 import Prelude
 
+import Concur.Core.Discharge (discharge, dischargePartialEffect)
 import Concur.Core.Types (Widget)
+import Concur.Thunk.Internal (Thunk, buildThunk)
+import Concur.VDom.DOM (nodeBuilder)
+import Concur.VDom.Props.Internal (buildProp)
 import Concur.VDom.Props.Internal as P
-import Concur.VDom.Types (HTML, HTMLNode)
+import Concur.VDom.Types (HTML, HTMLNode, unHTMLNode)
 import Control.Monad.Error.Class (throwError)
 import Data.Either (Either(..), either)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff (Aff, effectCanceler, error, makeAff, nonCanceler, runAff_)
 import Effect.Class (liftEffect)
+import Effect.Class.Console (log)
 import Effect.Exception (throwException)
+import Effect.Ref as Ref
+import Effect.Uncurried as EFn
 import Halogen.VDom as V
-import Halogen.VDom.Thunk (Thunk)
-import Halogen.VDom.Types (VDom)
-import Web.DOM.Document as DOM
+import Web.DOM.Document (Document) as DOM
+import Web.DOM.Node (Node, appendChild) as DOM
 import Web.DOM.ParentNode (QuerySelector(..), querySelector)
 import Web.Event.EventTarget (addEventListener, eventListener, removeEventListener)
 import Web.HTML (HTMLElement, window)
@@ -26,17 +33,6 @@ import Web.HTML.HTMLDocument.ReadyState (ReadyState(..))
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window as Window
 
--- newtype VDom a = VDom (V.VDom (Array (Prop a)) (Thunk VDom a))
-
-mkSpec :: DOM.Document
-  → V.VDomSpec (Array P.Prop) Unit
-mkSpec document = V.VDomSpec
-  { buildWidget: buildThunk (un VDom)
-  , buildAttributes: buildProp (const (pure unit))
-  , document
-  }
-
-{-
 -- | Run a Concur Widget inside a dom element with the specified id
 runWidgetInDom :: forall a. String -> Widget HTML a -> Effect Unit
 runWidgetInDom elemId = runWidgetInSelector ("#" <> elemId)
@@ -49,11 +45,39 @@ runWidgetInSelector elemId = renderWidgetInto (QuerySelector elemId)
 renderWidgetInto :: forall a. QuerySelector -> Widget HTML a -> Effect Unit
 renderWidgetInto query w = runAffX do
   awaitLoad
+  doc <- liftEffect $ Window.document =<< window
   mroot <- selectElement query
   case mroot of
     Nothing -> pure unit
-    Just root -> void $ liftEffect $ VDomDOM.render (renderComponent w) (HTMLElement.toElement root)
--}
+    Just root -> void $ liftEffect $ renderComponent (mkSpec (HTMLDocument.toDocument doc)) (HTMLElement.toNode root) w
+
+-- Spec
+type WidgetSpec = V.VDomSpec (Array P.Prop) (Thunk HTMLNode)
+mkSpec :: DOM.Document -> WidgetSpec
+mkSpec document = V.VDomSpec
+  { buildWidget: buildThunk unHTMLNode
+  , buildAttributes: buildProp
+  , document
+  }
+
+-- Render a component onto a DOM element
+renderComponent :: forall a . WidgetSpec -> DOM.Node -> Widget HTML a -> Effect Unit
+renderComponent spec parent winit = do
+  Tuple winit' v <- dischargePartialEffect winit
+  initMachine <- EFn.runEffectFn1 (V.buildVDom spec) (render v)
+  _ <- DOM.appendChild (V.extract initMachine) parent
+  ref <- Ref.new initMachine
+  handler ref (Right winit')
+  where
+    render v = unHTMLNode (nodeBuilder "div" [] v)
+    handler ref = go
+      where
+        go (Left err) = log ("FAILED! " <> show err)
+        go (Right r) = do
+          machine <- Ref.read ref
+          v <- discharge (handler ref) r
+          res <- EFn.runEffectFn2 V.step machine (render v)
+          Ref.write res ref
 
 -- Attribution - Everything below was taken from Halogen.Aff.Utils
 -- https://github.com/purescript-halogen/purescript-halogen/blob/master/src/Halogen/Aff/Util.purs
