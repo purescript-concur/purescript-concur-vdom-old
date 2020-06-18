@@ -3,4 +3,4 @@ module Concur.VDom
 ) where
 
 import Concur.VDom.Types (HTML, HTMLNode(..), mkHTML, mkHTMLNode, mkKeyedHTML, unHTML, unHTMLNode, unKeyedHTML) as X
-import Concur.VDom.Run (Res, WidgetSpec, awaitBody, awaitLoad, mkSpec, renderComponent, renderWidgetInto, runAffX, runWidgetInDom, runWidgetInSelector, selectElement) as X
+import Concur.VDom.Run (WidgetSpec, awaitBody, awaitLoad, mkSpec, renderComponent, renderWidgetInto, runWidgetInDom, runWidgetInSelector, selectElement) as X
