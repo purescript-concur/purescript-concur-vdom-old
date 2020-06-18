@@ -2,7 +2,8 @@ module Concur.VDom.Run where
 
 import Prelude
 
-import Concur.Core.Discharge (discharge, dischargePartialEffect)
+import Concur.Core.Discharge (discharge)
+import Concur.Core.Event (Observer(..), effMap, observe)
 import Concur.Core.Types (Widget)
 import Concur.Thunk.Internal (Thunk, buildThunk)
 import Concur.VDom.DOM (nodeBuilder)
@@ -10,14 +11,11 @@ import Concur.VDom.Props.Internal (buildProp)
 import Concur.VDom.Props.Internal as P
 import Concur.VDom.Types (HTML, HTMLNode, unHTMLNode)
 import Control.Monad.Error.Class (throwError)
-import Data.Either (Either(..), either)
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..), maybe)
-import Data.Tuple (Tuple(..))
 import Effect (Effect)
-import Effect.Aff (Aff, effectCanceler, error, makeAff, nonCanceler, runAff_)
-import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import Effect.Exception (throwException)
+import Effect.Exception (error)
 import Effect.Ref as Ref
 import Effect.Uncurried as EFn
 import Halogen.VDom as V
@@ -43,13 +41,12 @@ runWidgetInSelector elemId = renderWidgetInto (QuerySelector elemId)
 
 -- | Run a Concur Widget inside a dom element with the specified QuerySelector
 renderWidgetInto :: forall a. QuerySelector -> Widget HTML a -> Effect Unit
-renderWidgetInto query w = runAffX do
-  awaitLoad
-  doc <- liftEffect $ Window.document =<< window
+renderWidgetInto query w = runObserver awaitLoad \_ -> do
+  doc <- Window.document =<< window
   mroot <- selectElement query
   case mroot of
     Nothing -> pure unit
-    Just root -> void $ liftEffect $ renderComponent (mkSpec (HTMLDocument.toDocument doc)) (HTMLElement.toNode root) w
+    Just root -> void $ renderComponent (mkSpec (HTMLDocument.toDocument doc)) (HTMLElement.toNode root) w
 
 -- Spec
 type WidgetSpec = V.VDomSpec (Array P.Prop) (Thunk HTMLNode)
@@ -63,19 +60,19 @@ mkSpec document = V.VDomSpec
 -- Render a component onto a DOM element
 renderComponent :: forall a . WidgetSpec -> DOM.Node -> Widget HTML a -> Effect Unit
 renderComponent spec parent winit = do
-  Tuple winit' v <- dischargePartialEffect winit
-  initMachine <- EFn.runEffectFn1 (V.buildVDom spec) (render v)
+  -- Tuple winit' v <- dischargePartialEffect winit
+  initMachine <- EFn.runEffectFn1 (V.buildVDom spec) (render mempty)
   _ <- DOM.appendChild (V.extract initMachine) parent
   ref <- Ref.new initMachine
-  handler ref (Right winit')
+  handler ref (Right winit)
   where
-    render v = unHTMLNode (nodeBuilder "div" [] v)
+    render v = maybe (V.Text "NOTHING") (\arr -> unHTMLNode (nodeBuilder "div" [] arr)) v
     handler ref = go
       where
         go (Left err) = log ("FAILED! " <> show err)
         go (Right r) = do
           machine <- Ref.read ref
-          v <- discharge (handler ref) r
+          v <- discharge go r
           res <- EFn.runEffectFn2 V.step machine (render v)
           Ref.write res ref
 
@@ -83,34 +80,31 @@ renderComponent spec parent winit = do
 -- https://github.com/purescript-halogen/purescript-halogen/blob/master/src/Halogen/Aff/Util.purs
 
 -- | Waits for the document to load.
-awaitLoad :: Aff Unit
-awaitLoad = makeAff \callback -> do
+awaitLoad :: Observer Unit
+awaitLoad = Observer \callback -> do
   rs <- readyState =<< Window.document =<< window
   case rs of
     Loading -> do
       et <- Window.toEventTarget <$> window
-      listener <- eventListener (\_ -> callback (Right unit))
+      listener <- eventListener (\_ -> callback unit)
       addEventListener ET.domcontentloaded listener false et
-      pure $ effectCanceler (removeEventListener ET.domcontentloaded listener false et)
+      pure $ removeEventListener ET.domcontentloaded listener false et
     _ -> do
-      callback (Right unit)
-      pure nonCanceler
+      callback unit
+      pure (pure unit)
 
 -- | Waits for the document to load and then finds the `body` element.
-awaitBody :: Aff HTMLElement
-awaitBody = do
-  awaitLoad
+awaitBody :: Observer HTMLElement
+awaitBody = effMap awaitLoad \_ -> do
   body <- selectElement (QuerySelector "body")
   maybe (throwError (error "Could not find body")) pure body
 
 -- | Tries to find an element in the document.
-selectElement :: QuerySelector -> Aff (Maybe HTMLElement)
+selectElement :: QuerySelector -> Effect (Maybe HTMLElement)
 selectElement query = do
-  mel <- liftEffect $
-    ((querySelector query <<< HTMLDocument.toParentNode <=< Window.document) =<< window)
+  mel <- (querySelector query <<< HTMLDocument.toParentNode <=< Window.document) =<< window
   pure $ HTMLElement.fromElement =<< mel
 
--- | Runs an `Aff` value of the type commonly used by Halogen components. Any
--- | unhandled errors will be re-thrown as exceptions.
-runAffX :: forall x. Aff x -> Effect Unit
-runAffX = runAff_ (either throwException (const (pure unit)))
+-- | Runs an `Observer` in the background, calling a handler on completion
+runObserver :: forall x. Observer x -> (x -> Effect Unit) -> Effect Unit
+runObserver o handler = void $ observe o handler

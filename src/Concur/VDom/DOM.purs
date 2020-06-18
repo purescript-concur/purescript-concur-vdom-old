@@ -2,55 +2,69 @@ module Concur.VDom.DOM where
 
 import Prelude hiding (div,map,sub)
 
-import Concur.Core.DOM as CD
 import Concur.Core.LiftWidget (class LiftWidget, liftWidget)
-import Concur.Core.Props (Props)
-import Concur.Core.Types (Widget, display)
+import Concur.Core.Props (Props, mkProp)
+import Concur.Core.Types (Widget, display, mkLeafWidget, mkNodeWidget)
 import Concur.Thunk.Internal (thunk1)
 import Concur.VDom.Props (VDomProps)
 import Concur.VDom.Props.Internal as P
 import Concur.VDom.Types (HTML, HTMLNode, mkHTMLNode, unHTML, unKeyedHTML)
-import Control.MultiAlternative (class MultiAlternative)
-import Control.ShiftMap (class ShiftMap)
+import Control.MultiAlternative (class MultiAlternative, orr)
+import Control.ShiftMap (class ShiftMap, shiftMap)
 import Data.Function.Uncurried as Fn
+import Data.Functor (map)
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple)
 import Halogen.VDom.Types as D
 
--- | The VDom backend uses Array to make view monoidal
--- | We use this view adapter to derive our specialised `el` functions
-viewAdapter
-  :: forall ps vs res
-  .  (ps -> vs -> res)
-  -> (ps -> vs -> Array res)
-viewAdapter f = \ps vs -> [f ps vs]
-
 el
   :: forall m a p v
-  .  ShiftMap (Widget (Array v)) m
-  => (Array p -> Array v -> v)
+  .  ShiftMap (Widget v) m
+  => (Array p -> v -> v)
   -> Array (Props p a)
   -> m a
   -> m a
-el f = CD.el (viewAdapter f)
+el e props = shiftMap \f ->
+  mkNodeWidget \h v ->
+    e (map (mkProp h <<< map (pure <<< f)) props) v
+
+-- el
+--   :: forall m a p v
+--   .  ShiftMap (Widget (Array v)) m
+--   => (Array p -> Array v -> v)
+--   -> Array (Props p a)
+--   -> m a
+--   -> m a
+-- el e props = shiftMap \f ->
+--   mkNodeWidget \h v ->
+--     e (map (mkProp h <<< map f) props) v
 
 el'
   :: forall m a p v
-  .  ShiftMap (Widget (Array v)) m
+  .  ShiftMap (Widget v) m
   => MultiAlternative m
-  => (Array p -> Array v -> v)
+  => (Array p -> v -> v)
   -> Array (Props p a)
   -> Array (m a)
   -> m a
-el' f = CD.el' (viewAdapter f)
+el' f ps ms = el f ps (orr ms)
 
 elLeaf
   :: forall p v m a
-  .  LiftWidget (Array v) m
+  .  LiftWidget v m
   => (Array p -> v)
   -> Array (Props p a)
   -> m a
-elLeaf f = CD.elLeaf (\ps -> [f ps])
+elLeaf e props = liftWidget $ mkLeafWidget \h ->
+  e (map (mkProp h <<< map pure) props)
+
+-- elLeaf
+--   :: forall p v m a
+--   .  LiftWidget (Array v) m
+--   => (Array p -> v)
+--   -> Array (Props p a)
+--   -> m a
+-- elLeaf f = mkLeafWidget f -- ?axsd -- CD.elLeaf (\ps -> [f ps])
 
 type El1
   = forall m a. ShiftMap (Widget HTML) m => Array (VDomProps a) -> m a -> m a
@@ -80,11 +94,11 @@ text str = liftWidget wid
 
 -- node_ :: forall m a. ShiftMap (Widget HTML) m => String -> Array (VDomProps a) -> m a -> m a
 node_ :: String -> El1
-node_ s = el (nodeBuilder s)
+node_ s = el (\p c -> [nodeBuilder s p c])
 
 -- node :: forall m a. MultiAlternative m => ShiftMap (Widget HTML) m => String -> Array P.Prop -> Array (m a) -> m a
 node :: String -> El
-node s = el' (nodeBuilder s)
+node s = el' (\p c -> [nodeBuilder s p c])
 
 node' :: String -> El'
 node' s = node s []
