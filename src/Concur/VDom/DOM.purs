@@ -26,7 +26,7 @@ el
   -> m a
 el e props = shiftMap \f ->
   mkNodeWidget \h v ->
-    e (map (mkProp h <<< map (pure <<< f)) props) v
+    e (map (mkProp h <<< map f) props) v
 
 -- el
 --   :: forall m a p v
@@ -56,7 +56,7 @@ elLeaf
   -> Array (Props p a)
   -> m a
 elLeaf e props = liftWidget $ mkLeafWidget \h ->
-  e (map (mkProp h <<< map pure) props)
+  e (map (mkProp h) props)
 
 -- elLeaf
 --   :: forall p v m a

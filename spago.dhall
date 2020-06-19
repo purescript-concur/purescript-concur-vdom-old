@@ -4,13 +4,10 @@ You can edit this file as you like.
 -}
 { name = "concur-react"
 , dependencies =
-  [ "aff"
-  , "arrays"
-  , "avar"
+  [ "arrays"
   , "concur-core"
   , "console"
   , "foldable-traversable"
-  , "free"
   , "halogen-vdom"
   , "nonempty"
   , "profunctor-lenses"

@@ -2,9 +2,8 @@ module Concur.VDom.Run where
 
 import Prelude
 
-import Concur.Core.Discharge (discharge)
 import Concur.Core.Event (Observer(..), effMap, observe)
-import Concur.Core.Types (Widget)
+import Concur.Core.Types (Widget(..))
 import Concur.Thunk.Internal (Thunk, buildThunk)
 import Concur.VDom.DOM (nodeBuilder)
 import Concur.VDom.Props.Internal (buildProp)
@@ -12,7 +11,7 @@ import Concur.VDom.Props.Internal as P
 import Concur.VDom.Types (HTML, HTMLNode(..), unHTMLNode)
 import Control.Monad.Error.Class (throwError)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Effect (Effect)
 import Effect.Class.Console (log)
 import Effect.Exception (error)
@@ -59,29 +58,28 @@ mkSpec document = V.VDomSpec
 
 -- Render a component onto a DOM element
 renderComponent :: forall a . WidgetSpec -> DOM.Node -> Widget HTML a -> Effect Unit
-renderComponent spec parent winit = do
-  -- Tuple winit' v <- dischargePartialEffect winit
-  initMachine <- EFn.runEffectFn1 (V.buildVDom spec) (emptyMessage "LOADING...")
+renderComponent spec parent (Widget winit) = do
+  machineRef <- Ref.new Nothing
+  mv <- winit (handler machineRef)
+  let v = fromMaybe [HTMLNode (V.Text "LOADING ....")] mv
+  initMachine <- EFn.runEffectFn1 (V.buildVDom spec) (render v)
   _ <- DOM.appendChild (V.extract initMachine) parent
-  ref <- Ref.new initMachine
-  handler ref (Right winit)
+  Ref.write (Just initMachine) machineRef
   where
     -- If I use `mempty` or `text` initially then the entire machine fails
     -- This seems like a halogen-vdom bug
-    emptyMessage s = unHTMLNode (nodeBuilder "div" [] [HTMLNode (V.Text s)])
-    render Nothing = emptyMessage "NOTHING!!"
-    render (Just arr) = unHTMLNode (nodeBuilder "div" [] arr)
+    emptyMessage s = render $ [HTMLNode (V.Text s)]
+    render arr = unHTMLNode (nodeBuilder "div" [] arr)
     handler ref = go
       where
-        go (Left err) = log ("FAILED! " <> show err)
-        go (Right r) = do
-          machine <- Ref.read ref
-          mv <- discharge go r
-          case mv of
+        go (Left v) = do
+          mmachine <- Ref.read ref
+          case mmachine of
             Nothing -> pure unit
-            Just v -> do
-              res <- EFn.runEffectFn2 V.step machine (render (Just v))
-              Ref.write res ref
+            Just machine -> do
+              res <- EFn.runEffectFn2 V.step machine (render v)
+              Ref.write (Just res) ref
+        go (Right a) = log "EXITED"
 
 -- Attribution - Everything below was taken from Halogen.Aff.Utils
 -- https://github.com/purescript-halogen/purescript-halogen/blob/master/src/Halogen/Aff/Util.purs
