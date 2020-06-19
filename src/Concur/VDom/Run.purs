@@ -68,8 +68,9 @@ renderComponent spec parent winit = do
   where
     -- If I use `mempty` or `text` initially then the entire machine fails
     -- This seems like a halogen-vdom bug
-    emptyMessage s = unHTMLNode $ nodeBuilder "div" [] [HTMLNode $ V.Text s]
-    render v = maybe (emptyMessage "NOTHING!!") (\arr -> unHTMLNode (nodeBuilder "div" [] arr)) v
+    emptyMessage s = unHTMLNode (nodeBuilder "div" [] [HTMLNode (V.Text s)])
+    render Nothing = emptyMessage "NOTHING!!"
+    render (Just arr) = unHTMLNode (nodeBuilder "div" [] arr)
     handler ref = go
       where
         go (Left err) = log ("FAILED! " <> show err)
