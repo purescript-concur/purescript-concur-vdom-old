@@ -7,6 +7,8 @@ import Concur.VDom.Types (HTML)
 import Control.Applicative (pure)
 import Control.Bind (bind, discard)
 import Control.MultiAlternative (orr)
+import Data.Function (($))
+import Data.Functor (void)
 import Data.Monoid (mempty)
 import Data.Unit (Unit, unit)
 import Effect (Effect)
@@ -16,8 +18,8 @@ import Effect.Class.Console (log)
 -- | A Sample widget for testing
 sample :: Widget HTML Unit
 sample = do
-  e <- D.node "button" [P.handle "click"] [D.text "HELLO TO me"]
-  log "FIRED!!!"
+  void $ D.node "button" [P.handle "click"] [D.text "HELLO TO me"]
+  -- log "FIRED!!!"
 
 {-
 foreign import setTimeout :: Int -> Effect Unit -> Effect Unit

@@ -76,9 +76,12 @@ renderComponent spec parent winit = do
         go (Left err) = log ("FAILED! " <> show err)
         go (Right r) = do
           machine <- Ref.read ref
-          v <- discharge go r
-          res <- EFn.runEffectFn2 V.step machine (render v)
-          Ref.write res ref
+          mv <- discharge go r
+          case mv of
+            Nothing -> pure unit
+            Just v -> do
+              res <- EFn.runEffectFn2 V.step machine (render (Just v))
+              Ref.write res ref
 
 -- Attribution - Everything below was taken from Halogen.Aff.Utils
 -- https://github.com/purescript-halogen/purescript-halogen/blob/master/src/Halogen/Aff/Util.purs
